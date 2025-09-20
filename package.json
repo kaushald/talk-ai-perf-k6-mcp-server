@@ -1,0 +1,22 @@
+{
+  "name": "k6-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for K6 performance testing tool",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "axios": "^1.6.2",
+    "chalk": "^5.3.0",
+    "glob": "^10.3.10",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
