@@ -1,14 +1,10 @@
 /**
  * K6 List Handler
- * Handles listing of available K6 test scripts
+ * Handles listing of available K6 test scripts via App Server
  */
 
-import path from "path";
-import fs from "fs/promises";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import axios from 'axios';
+import { checkAppServer, getAppServerUrl } from '../utils/appServerCheck.js';
 
 // Tool configuration
 export const listToolConfig = {
@@ -22,72 +18,32 @@ export const listToolConfig = {
  */
 export async function handleList() {
   try {
-    const projectRoot = path.resolve(__dirname, "..", "..", "..", "..", "..");
-    const testDirs = [
-      path.join(projectRoot, "demo-app/tests/k6"),
-      path.join(projectRoot, "test-scripts"),
-      path.join(projectRoot, "tests/k6"),
-      path.join(projectRoot, "k6-tests"),
-    ];
-
-    const scripts = [];
-
-    for (const dir of testDirs) {
-      try {
-        const files = await fs.readdir(dir);
-        const jsFiles = files.filter((f) => f.endsWith(".js"));
-
-        for (const file of jsFiles) {
-          const fullPath = path.join(dir, file);
-          const stats = await fs.stat(fullPath);
-
-          scripts.push({
-            name: path.basename(file, ".js"),
-            path: fullPath,
-            relativePath: path.relative(projectRoot, fullPath),
-            description: formatDescription(path.basename(file, ".js")),
-            size: stats.size,
-            modified: stats.mtime,
-          });
-        }
-      } catch (err) {
-        // Directory doesn't exist, skip it silently
-      }
+    // Check if App Server is available
+    const serverAvailable = await checkAppServer();
+    if (!serverAvailable) {
+      throw new Error('K6 App Server is not available. Please start it with: cd k6-app-server && npm start');
     }
 
-    // Sort by name
-    scripts.sort((a, b) => a.name.localeCompare(b.name));
+    const appServerUrl = getAppServerUrl();
+    const response = await axios.get(`${appServerUrl}/api/tests/available`);
 
-    // Add default examples if no scripts found
-    if (scripts.length === 0) {
-      scripts.push(
-        {
-          name: "basic-load",
-          path: "demo-app/tests/k6/basic-load.js",
-          relativePath: "demo-app/tests/k6/basic-load.js",
-          description: "Basic load test",
-        },
-        {
-          name: "spike-test",
-          path: "demo-app/tests/k6/spike-test.js",
-          relativePath: "demo-app/tests/k6/spike-test.js",
-          description: "Spike test",
-        },
-        {
-          name: "stress-test",
-          path: "demo-app/tests/k6/stress-test.js",
-          relativePath: "demo-app/tests/k6/stress-test.js",
-          description: "Stress test",
-        },
-        {
-          name: "Checkout Flow Test",
-          path: "demo-app/tests/k6/checkout-flow.js",
-          relativePath: "demo-app/tests/k6/checkout-flow.js",
-          description:
-            "Checkout flow test that exercises all available API functionalities in the demo app",
-        }
-      );
-    }
+    const { tests, count, timestamp } = response.data;
+
+    // Transform App Server response to match expected format
+    const scripts = tests.map(test => ({
+      name: test.name,
+      filename: test.filename,
+      path: test.path,
+      relativePath: test.path, // App Server already provides relative path
+      description: test.description,
+      // New metadata from App Server
+      stages: test.stages,
+      totalDuration: test.totalDuration,
+      maxVUs: test.maxVUs,
+      // Keep some compatibility fields
+      size: undefined, // Not provided by App Server
+      modified: undefined // Not provided by App Server
+    }));
 
     return {
       content: [
@@ -96,11 +52,16 @@ export async function handleList() {
           text: JSON.stringify(
             {
               scripts,
-              count: scripts.length,
-              searchDirs: testDirs.map((dir) =>
-                path.relative(projectRoot, dir)
-              ),
-              workingDirectory: process.cwd(),
+              count,
+              timestamp,
+              source: 'k6-app-server',
+              appServerUrl,
+              // Enhanced metadata available
+              metadata: {
+                stagesAvailable: true,
+                durationAvailable: true,
+                maxVUsAvailable: true
+              }
             },
             null,
             2
@@ -116,7 +77,10 @@ export async function handleList() {
           text: JSON.stringify(
             {
               error: "Failed to list K6 scripts",
-              message: error.message,
+              message: error.response?.data?.error || error.message,
+              hint: error.message.includes('App Server') ?
+                'Start the K6 App Server with: cd k6-app-server && npm start' : undefined,
+              timestamp: new Date().toISOString()
             },
             null,
             2
@@ -127,12 +91,3 @@ export async function handleList() {
   }
 }
 
-/**
- * Format script name into description
- */
-function formatDescription(name) {
-  return name
-    .replace(/-/g, " ")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (l) => l.toUpperCase());
-}
